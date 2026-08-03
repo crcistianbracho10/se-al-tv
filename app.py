@@ -9,21 +9,17 @@ INPUT_M3U8 = "https://calm-forest-3478.cristianbracho904.workers.dev/master.m3u8
 OUTPUT_DIR = "static"
 MASTER_NAME = "canalcstreaming0934.m3u8"
 
-# Guardar la referencia del proceso
-ffmpeg_process = None
-
 
 def start_ffmpeg_stream():
-    global ffmpeg_process
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # Comando ultra ligero para no saturar la RAM/CPU del servidor gratuito
     command = [
         "ffmpeg",
         "-re",
         "-i",
         INPUT_M3U8,
-        # Re-codificación liviana de video y audio
+        "-vf",
+        "scale=w=854:h=480",
         "-c:v",
         "libx264",
         "-preset",
@@ -32,13 +28,10 @@ def start_ffmpeg_stream():
         "zerolatency",
         "-b:v",
         "800k",
-        "-s",
-        "854x480",  # Calidad fija 480p estable para evitar caídas
         "-c:a",
         "aac",
         "-b:a",
         "96k",
-        # Formato HLS
         "-f",
         "hls",
         "-hls_time",
@@ -53,8 +46,8 @@ def start_ffmpeg_stream():
     ]
 
     try:
-        ffmpeg_process = subprocess.Popen(command)
-        ffmpeg_process.wait()
+        process = subprocess.Popen(command)
+        process.wait()
     except Exception as e:
         print(f"Error en FFmpeg: {e}")
 
@@ -63,12 +56,13 @@ def start_ffmpeg_stream():
 st.set_page_config(page_title="Señal TV Live", layout="wide")
 st.title("📺 Señal TV - Transmisión en Vivo")
 
-# Iniciar FFmpeg ÚNICAMENTE si no se está ejecutando ya en segundo plano
-if "stream_running" not in st.session_state:
-    st.session_state["stream_running"] = True
+# Iniciar proceso único
+if "ffmpeg_active" not in st.session_state:
+    st.session_state["ffmpeg_active"] = True
     thread = threading.Thread(target=start_ffmpeg_stream, daemon=True)
     thread.start()
 
+# URL Web pública servida por Streamlit
 full_public_url = (
     f"https://senal-tv03.streamlit.app/app/static/{MASTER_NAME}"
 )
@@ -76,13 +70,14 @@ full_public_url = (
 st.subheader("Enlace directo M3U8 para IPTV / Reproductores:")
 st.code(full_public_url, language="text")
 
-m3u8_file_path = os.path.join(OUTPUT_DIR, MASTER_NAME)
+# Ruta física en el disco local para comprobar si el archivo ya se creó
+local_file_path = os.path.join(OUTPUT_DIR, MASTER_NAME)
 
-# Verificar si el manifiesto ya se generó
-if os.path.exists(m3u8_file_path):
+if os.path.exists(local_file_path):
     st.success("Transmisión activa")
-    st.video(f"app/static/{MASTER_NAME}")
+    # Pasamos la URL pública (con https://) para que el reproductor la lea por red
+    st.video(full_public_url)
 else:
-    st.info("Iniciando el motor de video... Espere unos segundos.")
-    time.sleep(4)
+    st.info("Generando manifiesto M3U8... Espere unos segundos.")
+    time.sleep(3)
     st.rerun()
