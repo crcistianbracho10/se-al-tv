@@ -2,29 +2,59 @@ import os
 import subprocess
 import sys
 
-# URL del stream de entrada (tu enlace M3U8)
+# URL del stream de entrada
 INPUT_M3U8 = "https://calm-forest-3478.cristianbracho904.workers.dev/master.m3u8"
 
-# URL de salida RTMP (es recomendable usar variables de entorno para las claves)
-RTMP_URL = os.getenv(
-    "OPENCASTER_RTMP_URL",
-    "rtmp://vs20.live.opencaster.com/opencaster/cristianhilos_314b91b0?psk=cristianhilos_314b91b0&tk=b77f89cbf4f83af5295e37a562a3379de814c3a945e7402811a589c00d91f442"
-)
+# Carpeta de salida donde se guardará el HLS multicalidad
+OUTPUT_DIR = "hls_output"
 
-def start_retransmission():
-    print(f"Iniciando retransmisión desde:\n -> {INPUT_M3U8}")
-    print("Enviando flujo a Opencaster RTMP...")
+def start_multi_bitrate_stream():
+    if not os.path.exists(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR)
 
-    # Comando FFmpeg optimizado para M3U8 -> RTMP
+    print(f"Iniciando procesamiento multicalidad desde:\n -> {INPUT_M3U8}")
+
+    # Comando complejo de FFmpeg para renderizar 1080p, 720p, 480p y 360p
     command = [
         "ffmpeg",
-        "-re",                           # Lee el HLS a velocidad de tiempo real
-        "-i", INPUT_M3U8,                 # Entrada M3U8
-        "-c:v", "copy",                   # Copia el video sin re-codificar (ahorra mucha CPU)
-        "-c:a", "aac",                    # Codifica audio a AAC por seguridad
-        "-b:a", "128k",                   # Bitrate de audio
-        "-f", "flv",                      # Formato requerido para RTMP
-        RTMP_URL
+        "-re",
+        "-i", INPUT_M3U8,
+        
+        # Filtros para escalar el video a 4 resoluciones distintas
+        "-filter_complex",
+        "[0:v]split=4[v1,v2,v3,v4]; "
+        "[v1]copy[v1out]; "
+        "[v2]scale=w=1280:h=720[v2out]; "
+        "[v3]scale=w=854:h=480[v3out]; "
+        "[v4]scale=w=640:h=360[v4out]",
+
+        # Configuración de Video / Audio para 1080p (Original / Alta)
+        "-map", "[v1out]", "-c:v:0", "libx264", "-b:v:0", "4000k", "-maxrate:v:0", "4400k", "-bufsize:v:0", "6000k",
+        "-map", "0:a?", "-c:a:0", "aac", "-b:a:0", "160k",
+
+        # Configuración de Video / Audio para 720p
+        "-map", "[v2out]", "-c:v:1", "libx264", "-b:v:1", "2200k", "-maxrate:v:1", "2500k", "-bufsize:v:1", "3300k",
+        "-map", "0:a?", "-c:a:1", "aac", "-b:a:1", "128k",
+
+        # Configuración de Video / Audio para 480p
+        "-map", "[v3out]", "-c:v:2", "libx264", "-b:v:2", "1200k", "-maxrate:v:2", "1400k", "-bufsize:v:2", "1800k",
+        "-map", "0:a?", "-c:a:2", "aac", "-b:a:2", "96k",
+
+        # Configuración de Video / Audio para 360p
+        "-map", "[v4out]", "-c:v:3", "libx264", "-b:v:3", "600k", "-maxrate:v:3", "700k", "-bufsize:v:3", "900k",
+        "-map", "0:a?", "-c:a:3", "aac", "-b:a:3", "64k",
+
+        # Parámetros del formato HLS Adaptativo
+        "-f", "hls",
+        "-hls_time", "6",
+        "-hls_playlist_type", "event",
+        "-hls_flags", "independent_segments",
+        "-hls_segment_filename", os.path.join(OUTPUT_DIR, "stream_%v_%03d.ts"),
+        
+        # Mapa de variantes para el archivo master.m3u8
+        "-master_pl_name", "master.m3u8",
+        "-var_stream_map", "v:0,a:0,name:1080p v:1,a:1,name:720p v:2,a:2,name:480p v:3,a:3,name:360p",
+        os.path.join(OUTPUT_DIR, "stream_%v.m3u8")
     ]
 
     try:
@@ -37,4 +67,4 @@ def start_retransmission():
         print(f"Error durante la transmisión: {e}")
 
 if __name__ == "__main__":
-    start_retransmission()
+    start_multi_bitrate_stream()
