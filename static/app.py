@@ -1,128 +1,88 @@
 import os
 import subprocess
-import sys
+import threading
+import time
+import streamlit as st
 
-# URL del stream de entrada
+# Configuración de URLs y directorios
 INPUT_M3U8 = "https://calm-forest-3478.cristianbracho904.workers.dev/master.m3u8"
-
-# La carpeta DEBE llamarse 'static' para que Streamlit la exponga públicamente
 OUTPUT_DIR = "static"
 MASTER_NAME = "canalcstreaming0934.m3u8"
 
+# Guardar la referencia del proceso
+ffmpeg_process = None
 
-def start_multi_bitrate_stream():
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
 
-    print(
-        f"Iniciando procesamiento y guardando en public: {OUTPUT_DIR}/{MASTER_NAME}"
-    )
+def start_ffmpeg_stream():
+    global ffmpeg_process
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+    # Comando ultra ligero para no saturar la RAM/CPU del servidor gratuito
     command = [
         "ffmpeg",
         "-re",
         "-i",
         INPUT_M3U8,
-        # Renderizar resoluciones (1080p, 720p, 480p, 360p)
-        "-filter_complex",
-        "[0:v]split=4[v1,v2,v3,v4]; "
-        "[v1]copy[v1out]; "
-        "[v2]scale=w=1280:h=720[v2out]; "
-        "[v3]scale=w=854:h=480[v3out]; "
-        "[v4]scale=w=640:h=360[v4out]",
-        # Configuración 1080p
-        "-map",
-        "[v1out]",
-        "-c:v:0",
+        # Re-codificación liviana de video y audio
+        "-c:v",
         "libx264",
-        "-b:v:0",
-        "4000k",
-        "-maxrate:v:0",
-        "4400k",
-        "-bufsize:v:0",
-        "6000k",
-        "-map",
-        "0:a?",
-        "-c:a:0",
+        "-preset",
+        "ultrafast",
+        "-tune",
+        "zerolatency",
+        "-b:v",
+        "800k",
+        "-s",
+        "854x480",  # Calidad fija 480p estable para evitar caídas
+        "-c:a",
         "aac",
-        "-b:a:0",
-        "160k",
-        # Configuración 720p
-        "-map",
-        "[v2out]",
-        "-c:v:1",
-        "libx264",
-        "-b:v:1",
-        "2200k",
-        "-maxrate:v:1",
-        "2500k",
-        "-bufsize:v:1",
-        "3300k",
-        "-map",
-        "0:a?",
-        "-c:a:1",
-        "aac",
-        "-b:a:1",
-        "128k",
-        # Configuración 480p
-        "-map",
-        "[v3out]",
-        "-c:v:2",
-        "libx264",
-        "-b:v:2",
-        "1200k",
-        "-maxrate:v:2",
-        "1400k",
-        "-bufsize:v:2",
-        "1800k",
-        "-map",
-        "0:a?",
-        "-c:a:2",
-        "aac",
-        "-b:a:2",
+        "-b:a",
         "96k",
-        # Configuración 360p
-        "-map",
-        "[v4out]",
-        "-c:v:3",
-        "libx264",
-        "-b:v:3",
-        "600k",
-        "-maxrate:v:3",
-        "700k",
-        "-bufsize:v:3",
-        "900k",
-        "-map",
-        "0:a?",
-        "-c:a:3",
-        "aac",
-        "-b:a:3",
-        "64k",
-        # Parámetros HLS
+        # Formato HLS
         "-f",
         "hls",
         "-hls_time",
-        "6",
-        "-hls_playlist_type",
-        "event",
+        "4",
+        "-hls_list_size",
+        "5",
         "-hls_flags",
-        "independent_segments",
+        "delete_segments+independent_segments",
         "-hls_segment_filename",
-        os.path.join(OUTPUT_DIR, "stream_%v_%03d.ts"),
-        "-master_pl_name",
-        MASTER_NAME,
-        "-var_stream_map",
-        "v:0,a:0,name:1080p v:1,a:1,name:720p v:2,a:2,name:480p v:3,a:3,name:360p",
-        os.path.join(OUTPUT_DIR, "stream_%v.m3u8"),
+        os.path.join(OUTPUT_DIR, "segment_%03d.ts"),
+        os.path.join(OUTPUT_DIR, MASTER_NAME),
     ]
 
     try:
-        process = subprocess.Popen(command)
-        process.wait()
-    except KeyboardInterrupt:
-        print("\nTransmisión detenida.")
-        sys.exit(0)
+        ffmpeg_process = subprocess.Popen(command)
+        ffmpeg_process.wait()
+    except Exception as e:
+        print(f"Error en FFmpeg: {e}")
 
 
-if __name__ == "__main__":
-    start_multi_bitrate_stream()
+# --- INTERFAZ STREAMLIT ---
+st.set_page_config(page_title="Señal TV Live", layout="wide")
+st.title("📺 Señal TV - Transmisión en Vivo")
+
+# Iniciar FFmpeg ÚNICAMENTE si no se está ejecutando ya en segundo plano
+if "stream_running" not in st.session_state:
+    st.session_state["stream_running"] = True
+    thread = threading.Thread(target=start_ffmpeg_stream, daemon=True)
+    thread.start()
+
+full_public_url = (
+    f"https://senal-tv03.streamlit.app/app/static/{MASTER_NAME}"
+)
+
+st.subheader("Enlace directo M3U8 para IPTV / Reproductores:")
+st.code(full_public_url, language="text")
+
+m3u8_file_path = os.path.join(OUTPUT_DIR, MASTER_NAME)
+
+# Verificar si el manifiesto ya se generó
+if os.path.exists(m3u8_file_path):
+    st.success("Transmisión activa")
+    st.video(f"app/static/{MASTER_NAME}")
+else:
+    st.info("Iniciando el motor de video... Espere unos segundos.")
+    time.sleep(4)
+    st.rerun()
