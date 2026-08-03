@@ -1,3 +1,6 @@
 streamlit
 streamlit-webrtc
 opencv-python-headless
+streamlit
+fastapi
+uvicorn
