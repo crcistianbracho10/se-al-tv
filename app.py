@@ -5,10 +5,8 @@ import sys
 # URL del stream de entrada
 INPUT_M3U8 = "https://calm-forest-3478.cristianbracho904.workers.dev/master.m3u8"
 
-# Carpeta de salida donde se guardarán los fragmentos y manifiestos
-OUTPUT_DIR = "hls_output"
-
-# Nombre personalizado para tu archivo .m3u8 principal
+# La carpeta DEBE llamarse 'static' para que Streamlit la exponga públicamente
+OUTPUT_DIR = "static"
 MASTER_NAME = "canalcstreaming0934.m3u8"
 
 
@@ -16,14 +14,16 @@ def start_multi_bitrate_stream():
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
 
-    print(f"Iniciando procesamiento multicalidad desde:\n -> {INPUT_M3U8}")
+    print(
+        f"Iniciando procesamiento y guardando en public: {OUTPUT_DIR}/{MASTER_NAME}"
+    )
 
     command = [
         "ffmpeg",
         "-re",
         "-i",
         INPUT_M3U8,
-        # Escalar el video a 4 resoluciones (1080p, 720p, 480p, 360p)
+        # Renderizar resoluciones (1080p, 720p, 480p, 360p)
         "-filter_complex",
         "[0:v]split=4[v1,v2,v3,v4]; "
         "[v1]copy[v1out]; "
@@ -98,7 +98,7 @@ def start_multi_bitrate_stream():
         "aac",
         "-b:a:3",
         "64k",
-        # Parámetros HLS Adaptativo
+        # Parámetros HLS
         "-f",
         "hls",
         "-hls_time",
@@ -109,7 +109,6 @@ def start_multi_bitrate_stream():
         "independent_segments",
         "-hls_segment_filename",
         os.path.join(OUTPUT_DIR, "stream_%v_%03d.ts"),
-        # Aquñi se asigna el nombre personalizado del manifiesto maestro
         "-master_pl_name",
         MASTER_NAME,
         "-var_stream_map",
@@ -121,10 +120,8 @@ def start_multi_bitrate_stream():
         process = subprocess.Popen(command)
         process.wait()
     except KeyboardInterrupt:
-        print("\nTransmisión detenida por el usuario.")
+        print("\nTransmisión detenida.")
         sys.exit(0)
-    except Exception as e:
-        print(f"Error durante la transmisión: {e}")
 
 
 if __name__ == "__main__":
