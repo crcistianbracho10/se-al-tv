@@ -1,18 +1,31 @@
+import http.server
 import os
+import socketserver
 import subprocess
 import threading
 import time
 import streamlit as st
 
-# Configuración de URLs y directorios
-INPUT_M3U8 = "https://calm-forest-3478.cristianbracho904.workers.dev/master.m3u8"
-OUTPUT_DIR = "static"
+# Carpetas y archivos
+OUTPUT_DIR = "video_data"
 MASTER_NAME = "canalcstreaming0934.m3u8"
+INPUT_M3U8 = "https://calm-forest-3478.cristianbracho904.workers.dev/master.m3u8"
+PORT = 8080
 
 
-def start_ffmpeg_stream():
+# 1. Servidor de archivos estáticos en segundo plano
+def run_file_server():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.chdir(OUTPUT_DIR)
+    handler = http.server.SimpleHTTPRequestHandler
+    # Permitir peticiones CORS para que reproductores externos puedan leerlo
+    handler.extensions_map.update({".m3u8": "application/x-mpegURL"})
+    with socketserver.TCPServer(("", PORT), handler) as httpd:
+        httpd.serve_forever()
 
+
+# 2. Proceso de retransmisión con FFmpeg
+def start_ffmpeg_stream():
     command = [
         "ffmpeg",
         "-re",
@@ -41,8 +54,8 @@ def start_ffmpeg_stream():
         "-hls_flags",
         "delete_segments+independent_segments",
         "-hls_segment_filename",
-        os.path.join(OUTPUT_DIR, "segment_%03d.ts"),
-        os.path.join(OUTPUT_DIR, MASTER_NAME),
+        "segment_%03d.ts",
+        MASTER_NAME,
     ]
 
     try:
@@ -52,32 +65,34 @@ def start_ffmpeg_stream():
         print(f"Error en FFmpeg: {e}")
 
 
+# --- INICIALIZACIÓN DE HILOS SECUNDARIOS ---
+if "servers_started" not in st.session_state:
+    st.session_state["servers_started"] = True
+
+    # Iniciar servidor estático en el puerto 8080
+    t_server = threading.Thread(target=run_file_server, daemon=True)
+    t_server.start()
+
+    # Iniciar FFmpeg
+    t_ffmpeg = threading.Thread(target=start_ffmpeg_stream, daemon=True)
+    t_ffmpeg.start()
+
+
 # --- INTERFAZ STREAMLIT ---
 st.set_page_config(page_title="Señal TV Live", layout="wide")
 st.title("📺 Señal TV - Transmisión en Vivo")
 
-# Iniciar proceso único
-if "ffmpeg_active" not in st.session_state:
-    st.session_state["ffmpeg_active"] = True
-    thread = threading.Thread(target=start_ffmpeg_stream, daemon=True)
-    thread.start()
+# URL de reproducción local/interna
+m3u8_file_path = os.path.join(OUTPUT_DIR, MASTER_NAME)
 
-# URL Web pública servida por Streamlit
-full_public_url = (
-    f"https://senal-tv03.streamlit.app/app/static/{MASTER_NAME}"
-)
+st.subheader("Estado de la retransmisión:")
 
-st.subheader("Enlace directo M3U8 para IPTV / Reproductores:")
-st.code(full_public_url, language="text")
+if os.path.exists(m3u8_file_path):
+    st.success("¡Manifiesto M3U8 generado correctamente!")
 
-# Ruta física en el disco local para comprobar si el archivo ya se creó
-local_file_path = os.path.join(OUTPUT_DIR, MASTER_NAME)
-
-if os.path.exists(local_file_path):
-    st.success("Transmisión activa")
-    # Pasamos la URL pública (con https://) para que el reproductor la lea por red
-    st.video(full_public_url)
+    # Si se usa un reproductor interno, leemos el archivo local o servido por HTTP
+    st.video(f"http://localhost:{PORT}/{MASTER_NAME}")
 else:
-    st.info("Generando manifiesto M3U8... Espere unos segundos.")
+    st.info("Generando segmentos HLS... Por favor espera unos segundos.")
     time.sleep(3)
     st.rerun()
