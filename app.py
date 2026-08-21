@@ -1,66 +1,66 @@
 import os
 import subprocess
-import threading
 import streamlit as st
 
-# Configuración de URLs y Token
-INPUT_M3U8 = "https://cristianbracho9047-lista-reproduccion.hf.space/hls/index.m3u8"
-RTMP_DESTINATION = "rtmp://ssh101.bozztv.com/ssh101/canalczulia"
-HF_TOKEN = "a56b7ad1426888f0491438f8384eda3101559a579294c04b38a0722767300449"
+st.set_page_config(page_title="Retransmisor RTMP", layout="centered")
 
-if "ffmpeg_logs" not in st.session_state:
-    st.session_state["ffmpeg_logs"] = "Esperando inicio..."
+st.title("Panel de Retransmisión de Señal")
+st.write("Herramienta para retransmitir desde HLS hacia RTMP sin generar sobrecarga visual local.")
 
-def run_stream():
-    # Construimos el argumento de headers correctamente para FFmpeg
-    # Usamos -headers para pasar el token de autorización Bearer de Hugging Face
-    header_string = f"Authorization: Bearer {HF_TOKEN}\r\n"
-    
-    command = [
-        "ffmpeg",
-        "-re",
-        "-headers", header_string,
-        "-i", INPUT_M3U8,
-        "-c", "copy",
-        "-f", "flv",
-        RTMP_DESTINATION,
-    ]
+# Configuración de URLs y Tokens
+default_hls = "https://cristianbracho9047-lista-reproduccion.hf.space/hls/index.m3u8"
+default_rtmp = "rtmp://ssh101.bozztv.com/ssh101/canalczulia"
 
-    try:
-        process = subprocess.Popen(
-            command, 
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.PIPE, 
-            universal_newlines=True
-        )
-        
-        for line in process.stderr:
-            st.session_state["ffmpeg_logs"] = line
-            print(line)
+hls_url = st.text_input("URL del Stream HLS de Origen:", value=default_hls)
+rtmp_url = st.text_input("URL del Servidor RTMP de Destino:", value=default_rtmp)
+hf_token = st.text_input("Token de Hugging Face (si el espacio es privado):", type="password", value="a56b7ad1426888f0491438f8384eda3101559a579294c04b38a0722767300449")
+
+if "process" not in st.session_state:
+    st.session_state.process = None
+
+col1, col2 = st.columns(2)
+
+with col1:
+    if st.button("Iniciar Retransmisión", type="primary"):
+        if st.session_state.process is None or st.session_state.process.poll() is not None:
+            # Comando FFmpeg para retransmitir sin decodificar video (copia directa -reconnect)
+            # Si se requiere autenticación con token en Hugging Face, se pasa en los headers de entrada de FFmpeg
+            ffmpeg_cmd = [
+                "ffmpeg",
+                "-headers", f"Authorization: Bearer {hf_token}",
+                "-reconnect", "1",
+                "-reconnect_streamed", "1",
+                "-reconnect_delay_max", "5",
+                "-i", hls_url,
+                "-c", "copy",
+                "-f", "flv",
+                rtmp_url
+            ]
             
-        process.wait()
-    except Exception as e:
-        st.session_state["ffmpeg_logs"] = f"Error crítico: {e}"
+            try:
+                # Ejecutar el proceso en segundo plano
+                st.session_state.process = subprocess.Popen(
+                    ffmpeg_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+                st.success("¡Retransmisión iniciada correctamente hacia el servidor RTMP!")
+            except Exception as e:
+                st.error(f"Error al iniciar FFmpeg: {e}")
+        else:
+            st.warning("La retransmisión ya se encuentra activa.")
 
-# Control del hilo en segundo plano
-if "rtmp_started" not in st.session_state:
-    st.session_state["rtmp_started"] = True
-    threading.Thread(target=run_stream, daemon=True).start()
+with col2:
+    if st.button("Detener Retransmisión"):
+        if st.session_state.process is not None and st.session_state.process.poll() is None:
+            st.session_state.process.terminate()
+            st.session_state.process = None
+            st.success("Retransmisión detenida.")
+        else:
+            st.info("No hay ninguna retransmisión activa en este momento.")
 
-# Interfaz en Streamlit
-st.set_page_config(page_title="Retransmisión Protegida - Canal Zulia", layout="wide")
-st.title("📺 Retransmisión HLS Protegida a RTMP")
-
-st.success("El proceso de retransmisión se ha lanzado en segundo plano.")
-
-st.markdown(f"""
-### Configuración:
-- **Origen (con token):** `{INPUT_M3U8}`
-- **Destino RTMP:** `{RTMP_DESTINATION}`
-""")
-
-st.subheader("🛠️ Registro de actividad de FFmpeg:")
-st.code(st.session_state["ffmpeg_logs"])
-
-if st.button("Actualizar registros"):
-    st.rerun()
+# Estado actual
+if st.session_state.process is not None and st.session_state.process.poll() is None:
+    st.info("Estado: Transmitiendo señal en vivo...")
+else:
+    st.warning("Estado: Detenido.")
