@@ -8,38 +8,59 @@ INPUT_M3U8 = "https://cristianbracho9047-lista-reproduccion.hf.space/hls/index.m
 RTMP_DESTINATION = "rtmp://ssh101.bozztv.com/ssh101/canalczulia"
 HF_TOKEN = "a56b7ad1426888f0491438f8384eda3101559a579294c04b38a0722767300449"
 
-# Proceso de retransmisión directa (copia exacta sin procesar)
-def start_direct_stream():
+# Variable global para guardar los logs de FFmpeg
+if "ffmpeg_logs" not in st.session_state:
+    st.session_state["ffmpeg_logs"] = "Esperando inicio..."
+
+def run_stream():
     command = [
         "ffmpeg",
         "-re",
         "-headers", f"Authorization: Bearer {HF_TOKEN}",
         "-i", INPUT_M3U8,
-        "-c", "copy",  # Copia directa sin re-escalar ni gastar CPU
+        "-c", "copy",
         "-f", "flv",
         RTMP_DESTINATION,
     ]
 
     try:
-        process = subprocess.Popen(command)
+        # Ejecutamos y capturamos el error (stderr de ffmpeg)
+        process = subprocess.Popen(
+            command, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE, 
+            universal_newlines=True
+        )
+        
+        # Leemos la salida de error en tiempo real
+        for line in process.stderr:
+            st.session_state["ffmpeg_logs"] = line
+            print(line) # También sale en la consola del servidor
+            
         process.wait()
     except Exception as e:
-        print(f"Error en la retransmisión: {e}")
+        st.session_state["ffmpeg_logs"] = f"Error crítico: {e}"
 
 # Control del hilo en segundo plano
 if "rtmp_started" not in st.session_state:
     st.session_state["rtmp_started"] = True
-    threading.Thread(target=start_direct_stream, daemon=True).start()
+    threading.Thread(target=run_stream, daemon=True).start()
 
 # Interfaz en Streamlit
-st.set_page_config(page_title="Retransmisión Directa - Canal Zulia", layout="wide")
-st.title("📺 Retransmisión Directa (Modo Copia)")
+st.set_page_config(page_title="Depuración - Retransmisión", layout="wide")
+st.title("📺 Estado y Depuración de la Retransmisión")
 
-st.success("Transmisión iniciada en segundo plano enviando la señal tal cual al servidor RTMP.")
+st.success("El hilo de retransmisión está activo. Revisa el registro de abajo para ver si FFmpeg logró conectar.")
 
 st.markdown(f"""
-### Detalles:
+### Configuración actual:
 - **Origen:** `{INPUT_M3U8}`
 - **Destino:** `{RTMP_DESTINATION}`
-- **Método:** Copia directa (`-c copy`) para consumo mínimo de recursos.
 """)
+
+st.subheader("🛠️ Registro de FFmpeg (Última línea recibida):")
+st.code(st.session_state["ffmpeg_logs"])
+
+# Botón para refrescar la página y ver si cambió el log
+if st.button("Actualizar estado"):
+    st.rerun()
