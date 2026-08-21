@@ -8,15 +8,18 @@ INPUT_M3U8 = "https://cristianbracho9047-lista-reproduccion.hf.space/hls/index.m
 RTMP_DESTINATION = "rtmp://ssh101.bozztv.com/ssh101/canalczulia"
 HF_TOKEN = "a56b7ad1426888f0491438f8384eda3101559a579294c04b38a0722767300449"
 
-# Variable global para guardar los logs de FFmpeg
 if "ffmpeg_logs" not in st.session_state:
     st.session_state["ffmpeg_logs"] = "Esperando inicio..."
 
 def run_stream():
+    # Construimos el argumento de headers correctamente para FFmpeg
+    # Usamos -headers para pasar el token de autorización Bearer de Hugging Face
+    header_string = f"Authorization: Bearer {HF_TOKEN}\r\n"
+    
     command = [
         "ffmpeg",
         "-re",
-        "-headers", f"Authorization: Bearer {HF_TOKEN}",
+        "-headers", header_string,
         "-i", INPUT_M3U8,
         "-c", "copy",
         "-f", "flv",
@@ -24,7 +27,6 @@ def run_stream():
     ]
 
     try:
-        # Ejecutamos y capturamos el error (stderr de ffmpeg)
         process = subprocess.Popen(
             command, 
             stdout=subprocess.PIPE, 
@@ -32,10 +34,9 @@ def run_stream():
             universal_newlines=True
         )
         
-        # Leemos la salida de error en tiempo real
         for line in process.stderr:
             st.session_state["ffmpeg_logs"] = line
-            print(line) # También sale en la consola del servidor
+            print(line)
             
         process.wait()
     except Exception as e:
@@ -47,20 +48,19 @@ if "rtmp_started" not in st.session_state:
     threading.Thread(target=run_stream, daemon=True).start()
 
 # Interfaz en Streamlit
-st.set_page_config(page_title="Depuración - Retransmisión", layout="wide")
-st.title("📺 Estado y Depuración de la Retransmisión")
+st.set_page_config(page_title="Retransmisión Protegida - Canal Zulia", layout="wide")
+st.title("📺 Retransmisión HLS Protegida a RTMP")
 
-st.success("El hilo de retransmisión está activo. Revisa el registro de abajo para ver si FFmpeg logró conectar.")
+st.success("El proceso de retransmisión se ha lanzado en segundo plano.")
 
 st.markdown(f"""
-### Configuración actual:
-- **Origen:** `{INPUT_M3U8}`
-- **Destino:** `{RTMP_DESTINATION}`
+### Configuración:
+- **Origen (con token):** `{INPUT_M3U8}`
+- **Destino RTMP:** `{RTMP_DESTINATION}`
 """)
 
-st.subheader("🛠️ Registro de FFmpeg (Última línea recibida):")
+st.subheader("🛠️ Registro de actividad de FFmpeg:")
 st.code(st.session_state["ffmpeg_logs"])
 
-# Botón para refrescar la página y ver si cambió el log
-if st.button("Actualizar estado"):
+if st.button("Actualizar registros"):
     st.rerun()
